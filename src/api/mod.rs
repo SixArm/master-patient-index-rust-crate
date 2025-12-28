@@ -34,7 +34,7 @@ impl<T> ApiResponse<T> {
     }
 
     /// Create an error response
-    pub fn error(code: impl Into<String>, message: impl Into<String>) -> ApiResponse<()> {
+    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
         ApiResponse {
             success: false,
             data: None,

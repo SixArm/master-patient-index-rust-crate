@@ -9,7 +9,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use utoipa::ToSchema;
-use chrono::Datelike;
 
 use crate::models::Patient;
 use crate::api::{ApiResponse, ApiError};
@@ -25,6 +24,14 @@ pub struct HealthResponse {
 }
 
 /// Health check endpoint
+#[utoipa::path(
+    get,
+    path = "/api/v1/health",
+    tag = "health",
+    responses(
+        (status = 200, description = "Service is healthy", body = HealthResponse)
+    )
+)]
 pub async fn health_check() -> impl IntoResponse {
     Json(HealthResponse {
         status: "healthy".to_string(),
@@ -58,6 +65,19 @@ pub async fn create_patient(
 }
 
 /// Get a patient by ID
+#[utoipa::path(
+    get,
+    path = "/api/v1/patients/{id}",
+    tag = "patients",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID")
+    ),
+    responses(
+        (status = 200, description = "Patient found", body = ApiResponse<Patient>),
+        (status = 404, description = "Patient not found", body = ApiResponse<()>),
+        (status = 500, description = "Internal server error", body = ApiResponse<()>)
+    )
+)]
 pub async fn get_patient(
     State(_state): State<AppState>,
     Path(_id): Path<Uuid>,
@@ -74,6 +94,20 @@ pub async fn get_patient(
 }
 
 /// Update a patient
+#[utoipa::path(
+    put,
+    path = "/api/v1/patients/{id}",
+    tag = "patients",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID")
+    ),
+    request_body = Patient,
+    responses(
+        (status = 200, description = "Patient updated", body = ApiResponse<Patient>),
+        (status = 404, description = "Patient not found", body = ApiResponse<()>),
+        (status = 500, description = "Internal server error", body = ApiResponse<()>)
+    )
+)]
 pub async fn update_patient(
     State(_state): State<AppState>,
     Path(_id): Path<Uuid>,
@@ -92,6 +126,19 @@ pub async fn update_patient(
 }
 
 /// Delete a patient (soft delete)
+#[utoipa::path(
+    delete,
+    path = "/api/v1/patients/{id}",
+    tag = "patients",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID")
+    ),
+    responses(
+        (status = 204, description = "Patient deleted"),
+        (status = 404, description = "Patient not found", body = ApiResponse<()>),
+        (status = 500, description = "Internal server error", body = ApiResponse<()>)
+    )
+)]
 pub async fn delete_patient(
     State(_state): State<AppState>,
     Path(_id): Path<Uuid>,
@@ -135,6 +182,21 @@ pub struct SearchResponse {
 }
 
 /// Search for patients
+#[utoipa::path(
+    get,
+    path = "/api/v1/patients/search",
+    tag = "search",
+    params(
+        ("q" = String, Query, description = "Search query"),
+        ("limit" = Option<usize>, Query, description = "Maximum results (default: 10, max: 100)"),
+        ("fuzzy" = Option<bool>, Query, description = "Enable fuzzy search")
+    ),
+    responses(
+        (status = 200, description = "Search results", body = ApiResponse<SearchResponse>),
+        (status = 400, description = "Invalid query", body = ApiResponse<()>),
+        (status = 500, description = "Internal server error", body = ApiResponse<()>)
+    )
+)]
 pub async fn search_patients(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
@@ -206,6 +268,17 @@ pub struct MatchResultsResponse {
 }
 
 /// Match a patient against existing records
+#[utoipa::path(
+    post,
+    path = "/api/v1/patients/match",
+    tag = "matching",
+    request_body = MatchRequest,
+    responses(
+        (status = 200, description = "Matching results", body = ApiResponse<MatchResultsResponse>),
+        (status = 400, description = "Invalid request", body = ApiResponse<()>),
+        (status = 500, description = "Internal server error", body = ApiResponse<()>)
+    )
+)]
 pub async fn match_patient(
     State(state): State<AppState>,
     Json(payload): Json<MatchRequest>,

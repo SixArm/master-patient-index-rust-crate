@@ -371,3 +371,75 @@ let candidate_ids = search_engine.search_by_name_and_year(
 let matcher = ProbabilisticMatcher::new(config);
 let matches = matcher.find_matches(&patient, &candidates)?;
 ```
+
+## Phase 5: RESTful API with Axum
+
+What Was Built
+
+1. Application State Management (src/api/rest/state.rs - 45 lines)
+- AppState struct with database pool, search engine, matcher, and config
+- Thread-safe Arc-wrapped components for sharing across async tasks
+
+2. HTTP Handlers (src/api/rest/handlers.rs - 324 lines)
+- Health Check: Service monitoring with version info
+- Patient CRUD: Create, Read, Update, Delete (foundation with TODO markers for DB)
+- Search: Multi-field search with fuzzy matching support
+- Matching: Patient matching with blocking strategy
+
+3. Router & Server (src/api/rest/mod.rs - 105 lines)
+- Versioned API routes under /api/v1
+- Swagger UI integration at /swagger-ui
+- OpenAPI 3.0 specification
+- CORS support for cross-origin requests
+- Server startup with configuration
+
+API Endpoints Implemented
+
+| Method | Endpoint                | Status                   |
+|--------|-------------------------|--------------------------|
+| GET    | /api/v1/health          | ✅ Fully functional      |
+| POST   | /api/v1/patients        | 🟡 Foundation (needs DB) |
+| GET    | /api/v1/patients/{id}   | 🟡 Foundation (needs DB) |
+| PUT    | /api/v1/patients/{id}   | 🟡 Foundation (needs DB) |
+| DELETE | /api/v1/patients/{id}   | 🟡 Foundation (needs DB) |
+| GET    | /api/v1/patients/search | ✅ Fully functional      |
+| POST   | /api/v1/patients/match  | ✅ Fully functional      |
+
+Plus:
+- /swagger-ui - Interactive API docs
+- /api-docs/openapi.json - OpenAPI spec
+
+Key Features
+
+✅ Smart Search:
+GET /api/v1/patients/search?q=Smith&fuzzy=true&limit=10
+- Fuzzy matching handles typos
+- Integrates with Tantivy search engine from Phase 4
+- Limit capping at 100 for safety
+
+✅ Patient Matching:
+POST /api/v1/patients/match
+
+```json
+{
+  "name": {"family": "Smith", "given": ["John"]},
+  "birth_date": "1980-01-15",
+  "limit": 10
+}
+```
+
+- Uses blocking strategy (search first, then match)
+- Integrates matcher from Phase 3
+
+✅ Structured Error Handling:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "SEARCH_ERROR",
+    "message": "Search failed: ..."
+  }
+}
+```

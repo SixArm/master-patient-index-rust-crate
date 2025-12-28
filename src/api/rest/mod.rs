@@ -10,8 +10,10 @@ use utoipa_swagger_ui::SwaggerUi;
 
 pub mod handlers;
 pub mod routes;
+pub mod state;
 
-use crate::config::ServerConfig;
+pub use state::AppState;
+
 use crate::Result;
 
 /// API documentation
@@ -27,29 +29,39 @@ use crate::Result;
         )
     ),
     paths(
-        // TODO: Add API endpoint paths
+        // TODO: Add path macros to handlers
     ),
     components(
         schemas(
             crate::models::Patient,
             crate::models::patient::HumanName,
+            crate::models::patient::NameUse,
             crate::models::Organization,
             crate::models::Identifier,
+            crate::models::identifier::IdentifierType,
+            crate::models::identifier::IdentifierUse,
             crate::api::ApiResponse::<crate::models::Patient>,
             crate::api::ApiError,
+            handlers::HealthResponse,
+            handlers::CreatePatientRequest,
+            handlers::SearchQuery,
+            handlers::SearchResponse,
+            handlers::MatchRequest,
+            handlers::MatchResponse,
+            handlers::MatchResultsResponse,
         )
     ),
     tags(
+        (name = "health", description = "Health check endpoint"),
         (name = "patients", description = "Patient management endpoints"),
         (name = "search", description = "Patient search endpoints"),
         (name = "matching", description = "Patient matching endpoints"),
-        (name = "organizations", description = "Organization management endpoints")
     )
 )]
 pub struct ApiDoc;
 
-/// Create the REST API router
-pub fn create_router() -> Router {
+/// Create the REST API router with application state
+pub fn create_router(state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/health", get(handlers::health_check))
         .route("/patients", post(handlers::create_patient))
@@ -57,7 +69,8 @@ pub fn create_router() -> Router {
         .route("/patients/:id", put(handlers::update_patient))
         .route("/patients/:id", delete(handlers::delete_patient))
         .route("/patients/search", get(handlers::search_patients))
-        .route("/patients/match", post(handlers::match_patient));
+        .route("/patients/match", post(handlers::match_patient))
+        .with_state(state);
 
     Router::new()
         .nest("/api/v1", api_routes)
@@ -66,14 +79,15 @@ pub fn create_router() -> Router {
 }
 
 /// Start the REST API server
-pub async fn serve(config: ServerConfig) -> Result<()> {
-    let app = create_router();
-    let addr = format!("{}:{}", config.host, config.port);
+pub async fn serve(state: AppState) -> Result<()> {
+    let app = create_router(state.clone());
+    let addr = format!("{}:{}", state.config.server.host, state.config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| crate::Error::Api(e.to_string()))?;
 
     tracing::info!("REST API server listening on {}", addr);
+    tracing::info!("Swagger UI available at http://{}/swagger-ui", addr);
 
     axum::serve(listener, app)
         .await
