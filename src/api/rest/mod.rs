@@ -29,7 +29,16 @@ use crate::Result;
         )
     ),
     paths(
-        // TODO: Add path macros to handlers
+        handlers::health_check,
+        handlers::create_patient,
+        handlers::get_patient,
+        handlers::update_patient,
+        handlers::delete_patient,
+        handlers::search_patients,
+        handlers::match_patient,
+        handlers::get_patient_audit_logs,
+        handlers::get_recent_audit_logs,
+        handlers::get_user_audit_logs,
     ),
     components(
         schemas(
@@ -49,6 +58,8 @@ use crate::Result;
             handlers::MatchRequest,
             handlers::MatchResponse,
             handlers::MatchResultsResponse,
+            handlers::AuditLogQuery,
+            handlers::UserAuditLogQuery,
         )
     ),
     tags(
@@ -56,6 +67,7 @@ use crate::Result;
         (name = "patients", description = "Patient management endpoints"),
         (name = "search", description = "Patient search endpoints"),
         (name = "matching", description = "Patient matching endpoints"),
+        (name = "audit", description = "Audit log query endpoints"),
     )
 )]
 pub struct ApiDoc;
@@ -70,6 +82,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/patients/:id", delete(handlers::delete_patient))
         .route("/patients/search", get(handlers::search_patients))
         .route("/patients/match", post(handlers::match_patient))
+        .route("/patients/:id/audit", get(handlers::get_patient_audit_logs))
+        .route("/audit/recent", get(handlers::get_recent_audit_logs))
+        .route("/audit/user", get(handlers::get_user_audit_logs))
         .with_state(state);
 
     Router::new()

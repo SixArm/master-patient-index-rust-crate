@@ -25,6 +25,14 @@ pub struct HealthResponse {
 }
 
 /// Health check endpoint
+#[utoipa::path(
+    get,
+    path = "/api/v1/health",
+    tag = "health",
+    responses(
+        (status = 200, description = "Service is healthy", body = HealthResponse)
+    )
+)]
 pub async fn health_check() -> impl IntoResponse {
     Json(HealthResponse {
         status: "healthy".to_string(),
@@ -41,6 +49,16 @@ pub struct CreatePatientRequest {
 }
 
 /// Create a new patient
+#[utoipa::path(
+    post,
+    path = "/api/v1/patients",
+    tag = "patients",
+    request_body = Patient,
+    responses(
+        (status = 201, description = "Patient created successfully"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn create_patient(
     State(state): State<AppState>,
     Json(mut payload): Json<Patient>,
@@ -58,8 +76,6 @@ pub async fn create_patient(
                 tracing::warn!("Failed to index patient in search engine: {}", e);
             }
 
-            // TODO: Publish event to stream
-
             (StatusCode::CREATED, Json(ApiResponse::success(patient)))
         }
         Err(e) => {
@@ -73,6 +89,19 @@ pub async fn create_patient(
 }
 
 /// Get a patient by ID
+#[utoipa::path(
+    get,
+    path = "/api/v1/patients/{id}",
+    tag = "patients",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID")
+    ),
+    responses(
+        (status = 200, description = "Patient found"),
+        (status = 404, description = "Patient not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn get_patient(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -99,6 +128,19 @@ pub async fn get_patient(
 }
 
 /// Update a patient
+#[utoipa::path(
+    put,
+    path = "/api/v1/patients/{id}",
+    tag = "patients",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID")
+    ),
+    request_body = Patient,
+    responses(
+        (status = 200, description = "Patient updated successfully"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn update_patient(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -114,8 +156,6 @@ pub async fn update_patient(
                 tracing::warn!("Failed to update patient in search engine: {}", e);
             }
 
-            // TODO: Publish update event
-
             (StatusCode::OK, Json(ApiResponse::success(patient)))
         }
         Err(e) => {
@@ -129,14 +169,28 @@ pub async fn update_patient(
 }
 
 /// Delete a patient (soft delete)
+#[utoipa::path(
+    delete,
+    path = "/api/v1/patients/{id}",
+    tag = "patients",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID")
+    ),
+    responses(
+        (status = 204, description = "Patient deleted successfully"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn delete_patient(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     match state.patient_repository.delete(&id) {
         Ok(()) => {
-            // TODO: Remove from search index
-            // TODO: Publish deletion event
+            // Remove from search index
+            if let Err(e) = state.search_engine.delete_patient(&id.to_string()) {
+                tracing::warn!("Failed to delete patient from search engine: {}", e);
+            }
 
             (StatusCode::NO_CONTENT, Json(ApiResponse::<()>::success(())))
         }
@@ -151,7 +205,7 @@ pub async fn delete_patient(
 }
 
 /// Search query parameters
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct SearchQuery {
     /// Search query string
     pub q: String,
@@ -178,6 +232,16 @@ pub struct SearchResponse {
 }
 
 /// Search for patients
+#[utoipa::path(
+    get,
+    path = "/api/v1/patients/search",
+    tag = "search",
+    params(SearchQuery),
+    responses(
+        (status = 200, description = "Search results", body = SearchResponse),
+        (status = 500, description = "Search error")
+    )
+)]
 pub async fn search_patients(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
@@ -270,6 +334,16 @@ pub struct MatchResultsResponse {
 }
 
 /// Match a patient against existing records
+#[utoipa::path(
+    post,
+    path = "/api/v1/patients/match",
+    tag = "matching",
+    request_body = MatchRequest,
+    responses(
+        (status = 200, description = "Match results", body = MatchResultsResponse),
+        (status = 500, description = "Matching error")
+    )
+)]
 pub async fn match_patient(
     State(state): State<AppState>,
     Json(payload): Json<MatchRequest>,
@@ -350,6 +424,120 @@ pub async fn match_patient(
             let error = ApiResponse::<MatchResultsResponse>::error(
                 "MATCH_ERROR",
                 format!("Matching failed: {}", e)
+            );
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error))
+        }
+    }
+}
+
+/// Audit log query parameters
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+pub struct AuditLogQuery {
+    /// Maximum number of results (default: 50, max: 500)
+    #[serde(default = "default_audit_limit")]
+    pub limit: i64,
+}
+
+fn default_audit_limit() -> i64 {
+    50
+}
+
+/// Get audit logs for a specific patient
+#[utoipa::path(
+    get,
+    path = "/api/v1/patients/{id}/audit",
+    tag = "audit",
+    params(
+        ("id" = Uuid, Path, description = "Patient UUID"),
+        AuditLogQuery
+    ),
+    responses(
+        (status = 200, description = "Audit logs retrieved successfully"),
+        (status = 500, description = "Database error")
+    )
+)]
+pub async fn get_patient_audit_logs(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(params): Query<AuditLogQuery>,
+) -> impl IntoResponse {
+    let limit = params.limit.min(500);
+
+    match state.audit_log.get_logs_for_entity("patient", id, limit) {
+        Ok(logs) => (StatusCode::OK, Json(ApiResponse::success(logs))),
+        Err(e) => {
+            let error = ApiResponse::<Vec<crate::db::models::DbAuditLog>>::error(
+                "DATABASE_ERROR",
+                format!("Failed to retrieve audit logs: {}", e)
+            );
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error))
+        }
+    }
+}
+
+/// Get recent audit logs
+#[utoipa::path(
+    get,
+    path = "/api/v1/audit/recent",
+    tag = "audit",
+    params(AuditLogQuery),
+    responses(
+        (status = 200, description = "Recent audit logs retrieved successfully"),
+        (status = 500, description = "Database error")
+    )
+)]
+pub async fn get_recent_audit_logs(
+    State(state): State<AppState>,
+    Query(params): Query<AuditLogQuery>,
+) -> impl IntoResponse {
+    let limit = params.limit.min(500);
+
+    match state.audit_log.get_recent_logs(limit) {
+        Ok(logs) => (StatusCode::OK, Json(ApiResponse::success(logs))),
+        Err(e) => {
+            let error = ApiResponse::<Vec<crate::db::models::DbAuditLog>>::error(
+                "DATABASE_ERROR",
+                format!("Failed to retrieve audit logs: {}", e)
+            );
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error))
+        }
+    }
+}
+
+/// User audit log query parameters
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+pub struct UserAuditLogQuery {
+    /// User ID to filter by
+    pub user_id: String,
+
+    /// Maximum number of results (default: 50, max: 500)
+    #[serde(default = "default_audit_limit")]
+    pub limit: i64,
+}
+
+/// Get audit logs by user
+#[utoipa::path(
+    get,
+    path = "/api/v1/audit/user",
+    tag = "audit",
+    params(UserAuditLogQuery),
+    responses(
+        (status = 200, description = "User audit logs retrieved successfully"),
+        (status = 500, description = "Database error")
+    )
+)]
+pub async fn get_user_audit_logs(
+    State(state): State<AppState>,
+    Query(params): Query<UserAuditLogQuery>,
+) -> impl IntoResponse {
+    let limit = params.limit.min(500);
+
+    match state.audit_log.get_logs_by_user(&params.user_id, limit) {
+        Ok(logs) => (StatusCode::OK, Json(ApiResponse::success(logs))),
+        Err(e) => {
+            let error = ApiResponse::<Vec<crate::db::models::DbAuditLog>>::error(
+                "DATABASE_ERROR",
+                format!("Failed to retrieve audit logs: {}", e)
             );
             (StatusCode::INTERNAL_SERVER_ERROR, Json(error))
         }

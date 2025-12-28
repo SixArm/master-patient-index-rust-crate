@@ -699,3 +699,31 @@ Application State:
 - Updated AppState in src/api/rest/state.rs:15 with event publisher and audit log fields
 - Wired up dependencies in AppState::new() constructor
 - Repository now automatically publishes events and logs audits for all operations
+
+## Phase 9: REST API
+
+Completed Tasks:
+1. ✅ Removed obsolete TODOs from handlers (event publishing now automatic via repository)
+2. ✅ Added search index deletion in delete handler for proper cleanup
+3. ✅ Implemented 3 audit log query endpoints
+4. ✅ Added comprehensive OpenAPI path annotations to all 10 endpoints
+5. ✅ Build and tests successful
+
+API Endpoints (10 total):
+- GET /api/v1/health - Health check
+- POST /api/v1/patients - Create patient
+- GET /api/v1/patients/{id} - Get patient
+- PUT /api/v1/patients/{id} - Update patient
+- DELETE /api/v1/patients/{id} - Delete patient (soft)
+- GET /api/v1/patients/search - Search patients
+- POST /api/v1/patients/match - Match patient records
+- GET /api/v1/patients/{id}/audit - Get patient audit history
+- GET /api/v1/audit/recent - Get recent system-wide audit logs
+- GET /api/v1/audit/user - Get user-specific audit logs
+
+Key Features:
+- Full OpenAPI/Swagger documentation at /swagger-ui
+- Automatic event publishing via repository layer (Phase 8 integration)
+- Consistent search index synchronization across all CRUD operations
+- Audit transparency with query endpoints for compliance
+- Type-safe request/response handling
