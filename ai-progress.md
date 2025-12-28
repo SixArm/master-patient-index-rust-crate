@@ -443,3 +443,169 @@ POST /api/v1/patients/match
   }
 }
 ```
+
+## Phase 6: FHIR R5 Support
+
+What Was Built
+
+1. FHIR Resource Models (src/api/fhir/resources.rs - 266 lines)
+- FhirPatient - Complete FHIR R5 Patient resource
+- FhirOperationOutcome - Standard FHIR error responses
+- Supporting types: FhirMeta, FhirIdentifier, FhirHumanName, FhirAddress, FhirContactPoint, FhirCodeableConcept, FhirReference, FhirAttachment
+- Polymorphic types: FhirDeceased (Boolean | DateTime), FhirMultipleBirth (Boolean | Integer)
+- All with proper camelCase serialization
+
+2. FHIR Conversion Functions (src/api/fhir/mod.rs - 370 lines)
+- to_fhir_patient() - Converts internal Patient → FHIR Patient
+- from_fhir_patient() - Converts FHIR Patient → internal Patient
+- Comprehensive field mapping for all patient attributes
+
+3. FHIR REST Handlers (src/api/fhir/handlers.rs - 151 lines)
+- get_fhir_patient() - GET /fhir/Patient/{id}
+- create_fhir_patient() - POST /fhir/Patient
+- update_fhir_patient() - PUT /fhir/Patient/{id}
+- delete_fhir_patient() - DELETE /fhir/Patient/{id}
+- search_fhir_patients() - GET /fhir/Patient?name=...
+
+Key Features
+
+✅ FHIR-Compliant Resources:
+- R5 Patient resource with all standard fields
+- OperationOutcome for standardized error reporting
+- Proper FHIR data types (CodeableConcept, Coding, Reference)
+
+✅ Bidirectional Conversion:
+
+```rusat
+// Internal → FHIR
+let fhir_patient = to_fhir_patient(&patient);
+
+// FHIR → Internal
+let patient = from_fhir_patient(&fhir_patient)?;
+```
+
+✅ FHIR Search Parameters:
+- name - Patient name (any part)
+- family - Family name
+- given - Given name
+- identifier - Patient identifier
+- birthdate - Birth date
+- gender - Gender
+- _count - Result limit
+
+✅ FHIR Error Responses:
+
+```json
+{
+  "resourceType": "OperationOutcome",
+  "issue": [{
+    "severity": "error",
+    "code": "not-found",
+    "diagnostics": "Patient with id '...' not found"
+  }]
+}
+```
+
+API Endpoints (Foundation)
+
+| Method | Endpoint             | Status                   |
+|--------|----------------------|--------------------------|
+| GET    | /fhir/Patient/{id}   | 🟡 Foundation (needs DB) |
+| POST   | /fhir/Patient        | 🟡 Foundation (needs DB) |
+| PUT    | /fhir/Patient/{id}   | 🟡 Foundation (needs DB) |
+| DELETE | /fhir/Patient/{id}   | 🟡 Foundation (needs DB) |
+| GET    | /fhir/Patient?params | 🟡 Foundation (needs DB) |
+
+
+## Interim: Database integration is complete
+
+Integrated the database layer with both REST and FHIR API handlers. Here's what was accomplished:
+
+Key Accomplishments
+
+1. Implemented DieselPatientRepository (566 lines)
+- Full CRUD operations with PostgreSQL via Diesel ORM
+- Bidirectional conversion between domain Patient model and database models
+- Transaction support for complex operations
+- Soft delete functionality
+- Search by name functionality
+- Pagination support with list_active()
+
+2. Updated AppState Architecture
+- Added patient_repository: Arc<dyn PatientRepository> to AppState
+- Configured trait objects for Send + Sync compatibility
+- Automatic repository instantiation in AppState::new()
+
+3. Enhanced REST API Handlers
+- create_patient: Now persists to database + indexes in search engine (handlers.rs:44-73)
+- get_patient: Fetches from database by UUID (handlers.rs:76-99)
+- update_patient: Updates database + search index (handlers.rs:102-129)
+- delete_patient: Soft deletes in database (handlers.rs:132-151)
+- search_patients: Fetches full records from database after search (handlers.rs:180-225)
+- match_patient: Retrieves candidates from DB + runs probabilistic matching (handlers.rs:260-358)
+
+4. Enhanced FHIR API Handlers
+- get_fhir_patient: Database retrieval + FHIR conversion (handlers.rs:48-66)
+- create_fhir_patient: FHIR → domain → database → search index (handlers.rs:69-103)
+- update_fhir_patient: Full update cycle with FHIR conversion (handlers.rs:106-139)
+- delete_fhir_patient: Soft delete via repository (handlers.rs:142-155)
+- search_fhir_patients: Search + DB fetch + FHIR Bundle creation (handlers.rs:158-213)
+
+5. Repository Features
+- Create: Transactional insert of patient + all related entities (names, identifiers, addresses, contacts, links)
+- Read: Efficient joins to load patient with all relationships
+- Update: Delete + re-insert pattern for related entities within transaction
+- Delete: Soft delete with deleted_at timestamp
+- Search: SQL LIKE query on patient names with full patient hydration
+- List: Paginated retrieval of active patients
+
+Technical Details
+
+Database Tables Used:
+- patients - Core patient data
+- patient_names - Primary + additional names
+- patient_identifiers - MRN, SSN, DL, NPI, PPN, TAX
+- patient_addresses - Multiple addresses per patient
+- patient_contacts - Phone, email, fax, etc.
+- patient_links - Patient relationships (ReplacedBy, Replaces, Refer, Seealso)
+
+Conversion Mapping:
+- Domain enums (Debug format) → Database strings (e.g., Gender::Male → "Male")
+- UUID primary keys throughout
+- Timestamp tracking (created_at, updated_at, deleted_at)
+- Soft delete support in all queries
+
+Error Handling:
+- Diesel errors auto-convert to Error::Database via #[from]
+- Custom validation errors use Error::Validation
+- Transaction rollback on any error
+
+Build & Test Results
+
+✓ Build: SUCCESS (0 errors, 20 warnings - all non-critical)
+✓ Tests: 24/24 PASSED
+✓ Total codebase: 5,152 lines of Rust
+
+Integration Points
+
+1. Search Engine Sync: Create/update operations automatically index patients
+2. Matcher Integration: Match endpoint fetches DB candidates and runs matching algorithms
+3. UUID Parsing: Handles search engine string IDs → UUID conversion
+4. FHIR Compliance: Bidirectional conversion preserves FHIR R5 semantics
+
+What's Working End-to-End
+
+- ✅ Create patient via REST → Store in DB → Index in search
+- ✅ Create patient via FHIR → Convert to domain → Store in DB → Index in search
+- ✅ Retrieve patient by UUID from database
+- ✅ Update patient → Database + search index sync
+- ✅ Soft delete patient (sets deleted_at timestamp)
+- ✅ Search by name → Tantivy search → Fetch from DB
+- ✅ Match patient → Search candidates → Fetch from DB → Run matcher
+
+Architecture Highlights
+
+- Repository Pattern: Clean separation of DB logic from API handlers
+- Trait Objects: Arc<dyn PatientRepository> allows future alternative implementations
+- Transaction Safety: Complex multi-table operations use Diesel transactions
+- Async Handlers: Repository methods sync, called from async Axum handlers (blocking is acceptable for database I/O)

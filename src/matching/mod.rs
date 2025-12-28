@@ -57,7 +57,7 @@ impl MatchScoreBreakdown {
 }
 
 /// Patient matcher trait
-pub trait PatientMatcher {
+pub trait PatientMatcher: Send + Sync {
     /// Match a patient against a candidate
     fn match_patients(&self, patient: &Patient, candidate: &Patient) -> Result<MatchResult>;
 

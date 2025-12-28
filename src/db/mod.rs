@@ -10,6 +10,8 @@ pub mod schema;
 pub mod models;
 pub mod repositories;
 
+pub use repositories::{PatientRepository, DieselPatientRepository};
+
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
 /// Create a database connection pool
