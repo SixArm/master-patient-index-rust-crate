@@ -9,8 +9,10 @@ use crate::Result;
 pub mod schema;
 pub mod models;
 pub mod repositories;
+pub mod audit;
 
-pub use repositories::{PatientRepository, DieselPatientRepository};
+pub use repositories::{PatientRepository, DieselPatientRepository, AuditContext};
+pub use audit::AuditLogRepository;
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 

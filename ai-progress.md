@@ -674,3 +674,28 @@ Architecture Highlights
         │  • patient_links             │
         └──────────────────────────────┘
 ```txt
+
+##  Phase 8: Event Streaming & Audit Logging
+
+Event Streaming Infrastructure:
+- Created InMemoryEventPublisher in src/streaming/producer.rs:75 with thread-safe event storage
+- Added Send + Sync bounds to EventProducer trait for Arc compatibility
+- Implemented event publishing for all patient lifecycle events (Create, Update, Delete, Merge, Link, Unlink)
+
+Audit Logging System:
+- Created AuditLogRepository in src/db/audit.rs (new file) with comprehensive audit tracking
+- Methods for logging CREATE, UPDATE, and DELETE actions
+- Query methods: get_logs_for_entity(), get_recent_logs(), get_logs_by_user()
+- Captures old/new values as JSON, plus user context (user_id, ip_address, user_agent)
+
+Repository Integration:
+- Enhanced DieselPatientRepository with optional event publisher and audit log dependencies
+- Added AuditContext struct for tracking user context in src/db/repositories.rs:135
+- Builder pattern methods: with_event_publisher(), with_audit_log()
+- Integrated event publishing and audit logging into create(), update(), and delete() operations
+- Events published AFTER successful database transactions to maintain consistency
+
+Application State:
+- Updated AppState in src/api/rest/state.rs:15 with event publisher and audit log fields
+- Wired up dependencies in AppState::new() constructor
+- Repository now automatically publishes events and logs audits for all operations

@@ -10,6 +10,24 @@ use crate::Result;
 use super::models::*;
 use super::schema::*;
 
+/// Audit context for tracking user actions
+#[derive(Debug, Clone)]
+pub struct AuditContext {
+    pub user_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+impl Default for AuditContext {
+    fn default() -> Self {
+        Self {
+            user_id: Some("system".to_string()),
+            ip_address: None,
+            user_agent: None,
+        }
+    }
+}
+
 /// Patient repository trait
 pub trait PatientRepository: Send + Sync {
     /// Create a new patient
@@ -34,12 +52,90 @@ pub trait PatientRepository: Send + Sync {
 /// Diesel-based patient repository implementation
 pub struct DieselPatientRepository {
     pool: Pool<ConnectionManager<PgConnection>>,
+    event_publisher: Option<std::sync::Arc<dyn crate::streaming::EventProducer>>,
+    audit_log: Option<std::sync::Arc<super::audit::AuditLogRepository>>,
 }
 
 impl DieselPatientRepository {
     /// Create a new repository with the given connection pool
     pub fn new(pool: Pool<ConnectionManager<PgConnection>>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            event_publisher: None,
+            audit_log: None,
+        }
+    }
+
+    /// Set the event publisher for this repository
+    pub fn with_event_publisher(
+        mut self,
+        publisher: std::sync::Arc<dyn crate::streaming::EventProducer>,
+    ) -> Self {
+        self.event_publisher = Some(publisher);
+        self
+    }
+
+    /// Set the audit log repository
+    pub fn with_audit_log(
+        mut self,
+        audit_log: std::sync::Arc<super::audit::AuditLogRepository>,
+    ) -> Self {
+        self.audit_log = Some(audit_log);
+        self
+    }
+
+    /// Publish an event if publisher is configured
+    fn publish_event(&self, event: crate::streaming::PatientEvent) {
+        if let Some(ref publisher) = self.event_publisher {
+            if let Err(e) = publisher.publish(event) {
+                tracing::error!("Failed to publish event: {}", e);
+            }
+        }
+    }
+
+    /// Log to audit trail if configured
+    fn log_audit(
+        &self,
+        action: &str,
+        entity_id: uuid::Uuid,
+        old_values: Option<serde_json::Value>,
+        new_values: Option<serde_json::Value>,
+        context: &AuditContext,
+    ) {
+        if let Some(ref audit_log) = self.audit_log {
+            let result = match action {
+                "CREATE" => audit_log.log_create(
+                    "Patient",
+                    entity_id,
+                    new_values.unwrap_or(serde_json::Value::Null),
+                    context.user_id.clone(),
+                    context.ip_address.clone(),
+                    context.user_agent.clone(),
+                ),
+                "UPDATE" => audit_log.log_update(
+                    "Patient",
+                    entity_id,
+                    old_values.unwrap_or(serde_json::Value::Null),
+                    new_values.unwrap_or(serde_json::Value::Null),
+                    context.user_id.clone(),
+                    context.ip_address.clone(),
+                    context.user_agent.clone(),
+                ),
+                "DELETE" => audit_log.log_delete(
+                    "Patient",
+                    entity_id,
+                    old_values.unwrap_or(serde_json::Value::Null),
+                    context.user_id.clone(),
+                    context.ip_address.clone(),
+                    context.user_agent.clone(),
+                ),
+                _ => Ok(()),
+            };
+
+            if let Err(e) = result {
+                tracing::error!("Failed to log audit: {}", e);
+            }
+        }
     }
 
     /// Get a database connection from the pool
@@ -312,7 +408,7 @@ impl PatientRepository for DieselPatientRepository {
     fn create(&self, patient: &Patient) -> Result<Patient> {
         let mut conn = self.get_conn()?;
 
-        conn.transaction(|conn| {
+        let result = conn.transaction(|conn| {
             let (new_patient, new_names, new_identifiers, new_addresses, new_contacts, new_links) =
                 self.to_db_models(patient);
 
@@ -363,7 +459,20 @@ impl PatientRepository for DieselPatientRepository {
             };
 
             self.from_db_models(db_patient, db_names, db_identifiers, db_addresses, db_contacts, db_links)
-        })
+        })?;
+
+        // Publish event
+        self.publish_event(crate::streaming::PatientEvent::Created {
+            patient: result.clone(),
+            timestamp: chrono::Utc::now(),
+        });
+
+        // Log audit
+        if let Ok(patient_json) = serde_json::to_value(&result) {
+            self.log_audit("CREATE", result.id, None, Some(patient_json), &AuditContext::default());
+        }
+
+        Ok(result)
     }
 
     fn get_by_id(&self, id: &Uuid) -> Result<Option<Patient>> {
@@ -409,7 +518,10 @@ impl PatientRepository for DieselPatientRepository {
     fn update(&self, patient: &Patient) -> Result<Patient> {
         let mut conn = self.get_conn()?;
 
-        conn.transaction(|conn| {
+        // Get old values for audit
+        let old_patient = self.get_by_id(&patient.id)?;
+
+        let result = conn.transaction(|conn| {
             // Update patient
             let update_patient = UpdateDbPatient {
                 active: Some(patient.active),
@@ -478,11 +590,29 @@ impl PatientRepository for DieselPatientRepository {
             // Fetch and return updated patient
             self.get_by_id(&patient.id)?
                 .ok_or_else(|| crate::Error::Validation("Patient not found after update".to_string()))
-        })
+        })?;
+
+        // Publish event
+        self.publish_event(crate::streaming::PatientEvent::Updated {
+            patient: result.clone(),
+            timestamp: chrono::Utc::now(),
+        });
+
+        // Log audit
+        if let Some(old_json) = old_patient.as_ref().and_then(|p| serde_json::to_value(p).ok()) {
+            if let Ok(new_json) = serde_json::to_value(&result) {
+                self.log_audit("UPDATE", result.id, Some(old_json), Some(new_json), &AuditContext::default());
+            }
+        }
+
+        Ok(result)
     }
 
     fn delete(&self, id: &Uuid) -> Result<()> {
         let mut conn = self.get_conn()?;
+
+        // Get old values for audit
+        let old_patient = self.get_by_id(id)?;
 
         // Soft delete
         diesel::update(patients::table.filter(patients::id.eq(id)))
@@ -491,6 +621,19 @@ impl PatientRepository for DieselPatientRepository {
                 patients::deleted_by.eq(Some("system".to_string())), // TODO: Get from context
             ))
             .execute(&mut conn)?;
+
+        // Publish event
+        self.publish_event(crate::streaming::PatientEvent::Deleted {
+            patient_id: *id,
+            timestamp: chrono::Utc::now(),
+        });
+
+        // Log audit
+        if let Some(old_patient) = old_patient {
+            if let Ok(old_json) = serde_json::to_value(&old_patient) {
+                self.log_audit("DELETE", *id, Some(old_json), None, &AuditContext::default());
+            }
+        }
 
         Ok(())
     }

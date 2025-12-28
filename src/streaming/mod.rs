@@ -49,10 +49,12 @@ impl PatientEvent {
 }
 
 /// Event producer trait
-pub trait EventProducer {
+pub trait EventProducer: Send + Sync {
     /// Publish a patient event
     fn publish(&self, event: PatientEvent) -> Result<()>;
 }
+
+pub use producer::InMemoryEventPublisher;
 
 /// Event consumer trait
 pub trait EventConsumer {
