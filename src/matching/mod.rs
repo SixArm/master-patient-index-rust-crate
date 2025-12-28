@@ -1,10 +1,13 @@
-//! Patient matching algorithms
+//! Patient matching algorithms and scoring
 
 use crate::models::Patient;
+use crate::config::MatchingConfig;
 use crate::Result;
 
 pub mod algorithms;
 pub mod scoring;
+
+pub use scoring::{ProbabilisticScorer, DeterministicScorer, MatchQuality};
 
 /// Match result containing a patient and their match score
 #[derive(Debug, Clone)]
@@ -24,49 +27,236 @@ pub struct MatchScoreBreakdown {
     pub identifier_score: f64,
 }
 
+impl MatchScoreBreakdown {
+    /// Get a summary of which components matched well
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+
+        if self.name_score >= 0.90 {
+            parts.push("name");
+        }
+        if self.birth_date_score >= 0.90 {
+            parts.push("DOB");
+        }
+        if self.gender_score >= 0.90 {
+            parts.push("gender");
+        }
+        if self.address_score >= 0.80 {
+            parts.push("address");
+        }
+        if self.identifier_score >= 0.95 {
+            parts.push("identifier");
+        }
+
+        if parts.is_empty() {
+            "no strong matches".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
 /// Patient matcher trait
 pub trait PatientMatcher {
     /// Match a patient against a candidate
     fn match_patients(&self, patient: &Patient, candidate: &Patient) -> Result<MatchResult>;
 
     /// Find potential matches for a patient
-    fn find_matches(&self, patient: &Patient) -> Result<Vec<MatchResult>>;
+    fn find_matches(&self, patient: &Patient, candidates: &[Patient]) -> Result<Vec<MatchResult>>;
+
+    /// Check if a score meets the matching threshold
+    fn is_match(&self, score: f64) -> bool;
 }
 
 /// Probabilistic matching strategy
 pub struct ProbabilisticMatcher {
-    threshold: f64,
+    scorer: ProbabilisticScorer,
 }
 
 impl ProbabilisticMatcher {
-    pub fn new(threshold: f64) -> Self {
-        Self { threshold }
+    pub fn new(config: MatchingConfig) -> Self {
+        Self {
+            scorer: ProbabilisticScorer::new(config),
+        }
+    }
+
+    /// Get the configured threshold (not implemented yet)
+    pub fn threshold(&self) -> f64 {
+        0.85 // TODO: expose config properly
+    }
+
+    /// Classify match quality
+    pub fn classify_match(&self, score: f64) -> MatchQuality {
+        self.scorer.classify_match(score)
     }
 }
 
 impl PatientMatcher for ProbabilisticMatcher {
-    fn match_patients(&self, _patient: &Patient, _candidate: &Patient) -> Result<MatchResult> {
-        // TODO: Implement probabilistic matching
-        todo!("Implement probabilistic matching algorithm")
+    fn match_patients(&self, patient: &Patient, candidate: &Patient) -> Result<MatchResult> {
+        Ok(self.scorer.calculate_score(patient, candidate))
     }
 
-    fn find_matches(&self, _patient: &Patient) -> Result<Vec<MatchResult>> {
-        // TODO: Implement match finding
-        todo!("Implement match finding")
+    fn find_matches(&self, patient: &Patient, candidates: &[Patient]) -> Result<Vec<MatchResult>> {
+        let mut matches: Vec<MatchResult> = candidates
+            .iter()
+            .map(|candidate| self.scorer.calculate_score(patient, candidate))
+            .filter(|result| self.is_match(result.score))
+            .collect();
+
+        // Sort by score descending
+        matches.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(matches)
+    }
+
+    fn is_match(&self, score: f64) -> bool {
+        self.scorer.is_match(score)
     }
 }
 
 /// Deterministic matching strategy
-pub struct DeterministicMatcher;
+pub struct DeterministicMatcher {
+    scorer: DeterministicScorer,
+}
+
+impl DeterministicMatcher {
+    pub fn new(config: MatchingConfig) -> Self {
+        Self {
+            scorer: DeterministicScorer::new(config),
+        }
+    }
+}
 
 impl PatientMatcher for DeterministicMatcher {
-    fn match_patients(&self, _patient: &Patient, _candidate: &Patient) -> Result<MatchResult> {
-        // TODO: Implement deterministic matching
-        todo!("Implement deterministic matching algorithm")
+    fn match_patients(&self, patient: &Patient, candidate: &Patient) -> Result<MatchResult> {
+        Ok(self.scorer.calculate_score(patient, candidate))
     }
 
-    fn find_matches(&self, _patient: &Patient) -> Result<Vec<MatchResult>> {
-        // TODO: Implement match finding
-        todo!("Implement match finding")
+    fn find_matches(&self, patient: &Patient, candidates: &[Patient]) -> Result<Vec<MatchResult>> {
+        let mut matches: Vec<MatchResult> = candidates
+            .iter()
+            .map(|candidate| self.scorer.calculate_score(patient, candidate))
+            .filter(|result| self.is_match(result.score))
+            .collect();
+
+        // Sort by score descending
+        matches.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(matches)
+    }
+
+    fn is_match(&self, score: f64) -> bool {
+        self.scorer.is_match(score)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{HumanName, Gender};
+    use chrono::NaiveDate;
+
+    fn create_test_config() -> MatchingConfig {
+        MatchingConfig {
+            threshold_score: 0.85,
+            exact_match_score: 1.0,
+            fuzzy_match_score: 0.8,
+        }
+    }
+
+    fn create_test_patient(family: &str, given: &str, dob: Option<NaiveDate>) -> Patient {
+        Patient {
+            id: uuid::Uuid::new_v4(),
+            identifiers: vec![],
+            active: true,
+            name: HumanName {
+                use_type: None,
+                family: family.to_string(),
+                given: vec![given.to_string()],
+                prefix: vec![],
+                suffix: vec![],
+            },
+            additional_names: vec![],
+            telecom: vec![],
+            gender: Gender::Male,
+            birth_date: dob,
+            deceased: false,
+            deceased_datetime: None,
+            addresses: vec![],
+            marital_status: None,
+            multiple_birth: None,
+            photo: vec![],
+            managing_organization: None,
+            links: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_probabilistic_find_matches() {
+        let config = MatchingConfig {
+            threshold_score: 0.70, // Lower threshold for test
+            exact_match_score: 1.0,
+            fuzzy_match_score: 0.8,
+        };
+        let matcher = ProbabilisticMatcher::new(config);
+
+        let dob = NaiveDate::from_ymd_opt(1980, 1, 15);
+        let patient = create_test_patient("Smith", "John", dob);
+
+        let candidates = vec![
+            create_test_patient("Smith", "John", dob), // Exact match
+            create_test_patient("Smyth", "John", dob), // Close match
+            create_test_patient("Johnson", "Bob", NaiveDate::from_ymd_opt(1990, 5, 20)), // No match
+        ];
+
+        let matches = matcher.find_matches(&patient, &candidates).unwrap();
+
+        // Should find at least one match (the exact match)
+        assert!(matches.len() >= 1, "Expected at least 1 match, got {}", matches.len());
+
+        // First match should have highest score
+        if matches.len() > 1 {
+            assert!(matches[0].score >= matches[1].score);
+        }
+    }
+
+    #[test]
+    fn test_deterministic_matcher() {
+        let config = create_test_config();
+        let matcher = DeterministicMatcher::new(config);
+
+        let dob = NaiveDate::from_ymd_opt(1980, 1, 15);
+        let patient1 = create_test_patient("Smith", "John", dob);
+        let patient2 = create_test_patient("Smith", "John", dob);
+
+        let result = matcher.match_patients(&patient1, &patient2).unwrap();
+
+        assert!(matcher.is_match(result.score));
+    }
+
+    #[test]
+    fn test_match_score_breakdown_summary() {
+        let breakdown = MatchScoreBreakdown {
+            name_score: 0.95,
+            birth_date_score: 0.92,
+            gender_score: 1.0,
+            address_score: 0.70,
+            identifier_score: 0.40,
+        };
+
+        let summary = breakdown.summary();
+        assert!(summary.contains("name"));
+        assert!(summary.contains("DOB"));
+        assert!(summary.contains("gender"));
     }
 }

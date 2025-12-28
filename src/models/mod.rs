@@ -8,9 +8,9 @@ pub mod patient;
 pub mod organization;
 pub mod identifier;
 
-pub use patient::Patient;
+pub use patient::{Patient, HumanName, NameUse, PatientLink, LinkType};
 pub use organization::Organization;
-pub use identifier::Identifier;
+pub use identifier::{Identifier, IdentifierType, IdentifierUse};
 
 /// Gender enumeration per FHIR specification
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]

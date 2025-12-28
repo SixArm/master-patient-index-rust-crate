@@ -15,6 +15,8 @@ The Master Patient Index (MPI) is a critical healthcare system that maintains a 
 - **Observability**: Comprehensive logging, metrics, and distributed tracing with OpenTelemetry
 - **Production Ready**: Built for millions of patients across thousands of clinics
 
+See `todo.md` for the complete implementation roadmap covering 20 phases of development.
+
 ## Features
 
 ### Patient Management
@@ -299,26 +301,6 @@ This project is dual-licensed under MIT OR Apache-2.0.
 ## Support
 
 For questions or issues, please open an issue on GitHub.
-
-## Roadmap
-
-See `todo.md` for the complete implementation roadmap covering 20 phases of development.
-
-### Phase 1: Foundation ✅
-- [x] Project initialization
-- [x] Dependency configuration
-- [x] Module structure
-- [x] Database configuration
-- [x] OpenTelemetry setup
-
-### Upcoming Phases
-- Phase 2: Database Schema & Models
-- Phase 3: Core MPI Logic
-- Phase 4: Search Engine Integration
-- Phase 5: RESTful API
-- Phase 6: FHIR R5 Support
-- Phase 7: gRPC API
-- ...and more (see todo.md)
 
 ## Acknowledgments
 
