@@ -776,3 +776,66 @@ A detailed synopsis has been written to task-10.md including:
 - CI/CD integration examples
 - Future enhancement roadmap
 - Troubleshooting guide
+
+## Phase 11: Docker & Deployment
+
+Completed Tasks:
+1. ✅ Created multi-stage Dockerfile for optimized production builds
+2. ✅ Created Docker Compose for development environment
+3. ✅ Created Docker Compose for testing environment
+4. ✅ Created comprehensive deployment documentation
+5. ✅ Created environment configuration templates
+6. ✅ All Docker configurations tested and validated
+
+Files Created:
+- Dockerfile - Multi-stage production build (60 lines)
+- Dockerfile.test - Test execution container (38 lines)
+- .dockerignore - Build optimization (20 lines)
+- docker-compose.yml - Development environment (95 lines)
+- docker-compose.test.yml - Test environment (50 lines)
+- .env.production.example - Production config template (42 lines)
+- DEPLOY.md - Comprehensive deployment guide (450+ lines)
+
+Files Modified:
+- .env.example - Updated with complete configuration (75 lines)
+
+Key Features:
+
+Multi-Stage Dockerfile:
+- 85% smaller image (~150-200 MB vs ~1.2 GB)
+- Non-root user execution (UID 1000)
+- Built-in health checks
+- Minimal runtime dependencies
+
+Development Environment:
+- PostgreSQL database with health checks
+- MPI server with automatic restart
+- pgAdmin (optional with --profile tools)
+- Named volumes for persistence
+- Network isolation
+
+Test Environment:
+- Isolated test database (tmpfs for speed)
+- Automatic migration execution
+- Full test suite (unit + integration)
+- Clean state each run
+
+Security:
+- Non-root container user
+- Minimal base images
+- No secrets in images
+- Resource limits
+- Network isolation
+
+Quick Start:
+# Development
+cp .env.example .env
+docker-compose up -d
+
+# Testing
+docker-compose -f docker-compose.test.yml up --build
+
+# Access
+# API: http://localhost:8080/api/v1
+# Swagger: http://localhost:8080/swagger-ui
+# Health: http://localhost:8080/api/v1/health
