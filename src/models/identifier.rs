@@ -57,6 +57,20 @@ pub enum IdentifierType {
     Other,
 }
 
+impl std::fmt::Display for IdentifierType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentifierType::MRN => write!(f, "MRN"),
+            IdentifierType::SSN => write!(f, "SSN"),
+            IdentifierType::DL => write!(f, "DL"),
+            IdentifierType::NPI => write!(f, "NPI"),
+            IdentifierType::PPN => write!(f, "PPN"),
+            IdentifierType::TAX => write!(f, "TAX"),
+            IdentifierType::Other => write!(f, "OTHER"),
+        }
+    }
+}
+
 impl Identifier {
     /// Create a new identifier
     pub fn new(

@@ -315,3 +315,59 @@ Production Ready:
 - Error handling
 - Type-safe
 - Performance optimized
+
+##  Phase 4: Search Engine Integration
+
+What Was Built
+
+1. Tantivy Index Infrastructure (src/search/index.rs - 240 lines)
+- PatientIndexSchema with 11 searchable fields
+- PatientIndex with create/open/create_or_open methods
+- Index statistics and optimization
+- Manual reload capability for real-time updates
+
+2. Search Engine API (src/search/mod.rs - 406 lines)
+- index_patient() - Index single patient with all demographics
+- index_patients() - Bulk indexing with single commit optimization
+- search() - Multi-field search across names and identifiers
+- fuzzy_search() - Typo-tolerant search (edit distance 2)
+- search_by_name_and_year() - Combined fuzzy name + birth year for blocking
+- delete_patient() - Remove patient from index
+- stats() and optimize() - Index management
+
+Key Features
+
+✅ Multi-field full-text search across patient names and identifiers
+✅ Fuzzy matching handles typos like "Smith" matching "Smyth"
+✅ Blocking search for patient matching (reduces candidates by name+year)
+✅ Bulk indexing with single commit for performance
+✅ Real-time updates via automatic reader reload
+✅ Index optimization with segment merging
+
+Fixes Applied
+
+Fixed several compilation issues during implementation:
+- Added tempfile dev-dependency for tests
+- Added Display trait for IdentifierType
+- Changed ReloadPolicy::OnCommit to OnCommitWithDelay
+- Replaced merge_segments() with wait_merging_threads()
+- Added Value trait import for document field access
+- Fixed create_or_open() to check for meta.json instead of directory
+- Added manual reload() calls in tests for immediate document visibility
+
+Integration Ready
+
+The search engine integrates seamlessly with patient matching:
+
+```rust
+// Reduce millions of patients to ~100 candidates
+let candidate_ids = search_engine.search_by_name_and_year(
+    &patient.name.family,
+    patient.birth_date.map(|d| d.year()),
+    100
+)?;
+
+// Run sophisticated matching on reduced set
+let matcher = ProbabilisticMatcher::new(config);
+let matches = matcher.find_matches(&patient, &candidates)?;
+```
